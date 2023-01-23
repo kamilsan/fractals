@@ -1,4 +1,5 @@
 #include <cmath>
+#include <algorithm>
 
 #include "complex.hpp"
 #include "image.hpp"
@@ -12,126 +13,30 @@ Complex pointToComplex(uint x, uint y, double hw, double hh, Complex center, dou
     ((y - hh) / hh) * rangeIm + center.im);
 }
 
-float interpolate(int a, int b, float t)
-{
-  return (1.0-t)*a + t*b;
-}
+Color getColor(const Complex& z, uint iter) {
+  // Coloring scheme taken from Taichi example:
+  // https://github.com/taichi-dev/taichi/blob/master/python/taichi/examples/simulation/mandelbrot_zoom.py
+  
+  const auto v = std::log2(iter + 1 - std::log2(std::log2(z.magnitude()))) / 5.0;
+  
+  unsigned char r = 0;
+  unsigned char g = 0;
+  unsigned char b = 0;
 
-void sRGBEncode(float& c)
-{
-  float y = 1.0f/2.4f;
+  if (v < 1.0f) {
+    r = (unsigned char)std::min(255.0, std::max(0.0, 255 * std::pow(v, 4)));
+    g = (unsigned char)std::min(255.0, std::max(0.0, 255 * std::pow(v, 2.5f)));
+    b = (unsigned char)std::min(255.0, std::max(0.0, 255 * v)); 
+  } 
+  else {
+    const auto v2 = std::max(0.0, 2.0 - v);
 
-  if(c <= 0.0031308f) c *= 12.92f;
-  else c = 1.055f * powf(c, y) - 0.055f;
+    r = (unsigned char)std::min(255.0, std::max(0.0, 255 * v2));
+    g = (unsigned char)std::min(255.0, std::max(0.0, 255 * std::pow(v2, 1.5f)));
+    b = (unsigned char)std::min(255.0, std::max(0.0, 255 * std::pow(v2, 3))); 
+  }
 
-}
-void sRGBDecode(float& c)
-{
-  if(c <= 0.04045f) c /= 12.92f;
-  else c = powf((c+0.055f)/1.055f, 2.4f);
-}
-
-/*
-Position = 0.0     Color = (0,   7,   100)
-Position = 0.16    Color = (32,  107, 203)
-Position = 0.42    Color = (237, 255, 255)
-Position = 0.6425  Color = (255, 170, 0)
-Position = 0.8575  Color = (0,   2,   0)
-Position = 1.0     Color = (0,   7,   100)
-*/
-
-unsigned char falseColorR(float v, uint max)
-{
-  float t = log(v)/log(max);
-  float c;
-  if (t <= 0.16)
-  {
-    t /= 0.16;
-    c = interpolate(0, 32, t);
-  }
-  else if(t <= 0.42)
-  {
-    t = (t-0.16)/(0.42-0.16);
-    c = interpolate(32, 237, t);
-  }
-  else if(t <= 0.6425)
-  {
-    t = (t-0.42)/(0.6425-0.42);
-    c = interpolate(237, 255, t);
-  }
-  else if(t <= 0.8575)
-  {
-    t = (t-0.6425)/(0.8575-0.6425);
-    c = interpolate(255, 0, t);
-  }
-  else
-  {
-    t = (t-0.8575)/(1.0-0.8575);
-    c = interpolate(0, 0, t);
-  }
-  return (unsigned char)(c + 0.5);
-}
-unsigned char falseColorG(float v, uint max)
-{
-  float t = log(v)/log(max);
-  float c;
-  if (t <= 0.16)
-  {
-    t /= 0.16;
-    c = interpolate(7, 107, t);
-  }
-  else if(t <= 0.42)
-  {
-    t = (t-0.16)/(0.42-0.16);
-    c = interpolate(107, 255, t);
-  }
-  else if(t <= 0.6425)
-  {
-    t = (t-0.42)/(0.6425-0.42);
-    c = interpolate(255, 170, t);
-  }
-  else if(t <= 0.8575)
-  {
-    t = (t-0.6425)/(0.8575-0.6425);
-    c = interpolate(170, 2, t);
-  }
-  else
-  {
-    t = (t-0.8575)/(1.0-0.8575);
-    c = interpolate(2, 7, t);
-  }
-  return (unsigned char)(c + 0.5);
-}
-unsigned char falseColorB(float v, uint max)
-{
-  float t = log(v)/log(max);
-  float c;
-  if (t <= 0.16)
-  {
-    t /= 0.16;
-    c = interpolate(100, 203, t);
-  }
-  else if(t <= 0.42)
-  {
-    t = (t-0.16)/(0.42-0.16);
-    c = interpolate(203, 255, t);
-  }
-  else if(t <= 0.6425)
-  {
-    t = (t-0.42)/(0.6425-0.42);
-    c = interpolate(255, 0, t);
-  }
-  else if(t <= 0.8575)
-  {
-    t = (t-0.6425)/(0.8575-0.6425);
-    c = interpolate(0, 0, t);
-  }
-  else
-  {
-    t = (t-0.8575)/(1.0-0.8575);
-    c = interpolate(0, 100, t);
-  }
-  return (unsigned char)(c + 0.5);
+  return Color(r, g, b);
 }
 
 int main()
@@ -147,15 +52,11 @@ int main()
 
   Image result{width, height};
 
-  const uint MAX_ITER = 5000;
+  const uint MAX_ITER = 100;
 
   Complex z, p;
   uint iter;
-  float smooth;
-  int escapeRadiusSq = 100;
-
-  float invLogEx = 1.0/log(2);
-  float logTerm = log(log(escapeRadiusSq))*invLogEx;
+  int escapeRadiusSq = 50;
 
   for(uint y = 0; y < height; ++y)
   {
@@ -168,22 +69,15 @@ int main()
       {
         z = z*z + p;
       }
-      z = z*z + p;
-      z = z*z + p;
-      iter += 2;
+
       if(iter < MAX_ITER)
       {
-        smooth = float(iter) + logTerm - log(log(z.magnitudeSq()))*invLogEx;
-        smooth = std::fmin(smooth, (float)MAX_ITER);
-
-        unsigned char r = falseColorR(smooth, MAX_ITER);
-        unsigned char g = falseColorG(smooth, MAX_ITER);
-        unsigned char b = falseColorB(smooth, MAX_ITER);
-
-        result.setPixel(x, y, Color(r, g, b));
+        const auto color = getColor(z, iter);
+        result.setPixel(x, y, color);
       }
-      else
+      else {
         result.setPixel(x, y, Color::Black);
+      }
     }
   }
 
